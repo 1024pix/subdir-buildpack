@@ -1,3 +1,8 @@
 #!/usr/bin/env bash
 
-echo "--- {}"
+if [ -e $1/subdir_pack_release.out ]; then
+  cat $1/subdir_pack_release.out
+  rm $1/subdir_pack_release.out
+else
+  echo "--- {}"
+fi

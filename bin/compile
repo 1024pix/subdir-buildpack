@@ -4,30 +4,107 @@
 BUILD_DIR=${1:-}
 CACHE_DIR=${2:-}
 ENV_DIR=${3:-}
+BUILDPACK=$(cat $ENV_DIR/BUILDPACK)
 
-if [ -f $ENV_DIR/PROJECT_PATH ]; then
-	PROJECT_PATH=`cat $ENV_DIR/PROJECT_PATH`
-	if [ -d $BUILD_DIR/$PROJECT_PATH ]; then
-		echo "-----> Subdir buildpack in $PROJECT_PATH"
-		echo "       creating cache: $CACHE_DIR"
-		mkdir -p $CACHE_DIR
-		TMP_DIR=`mktemp -d $CACHE_DIR/subdirXXXXX`
-		echo "       created tmp dir: $TMP_DIR"
-		echo "       moving working dir: $PROJECT_PATH to $TMP_DIR"
-		cp -R $BUILD_DIR/$PROJECT_PATH/. $TMP_DIR/
-	 	echo "       cleaning build dir $BUILD_DIR"
-		rm -rf $BUILD_DIR
-		echo "       recreating $BUILD_DIR"
-		mkdir -p $BUILD_DIR
-		echo "       copying preserved work dir from cache $TMP_DIR to build dir $BUILD_DIR"
-		cp -R $TMP_DIR/. $BUILD_DIR/
-		echo "       cleaning tmp dir $TMP_DIR"
-		rm -rf $TMP_DIR
-		exit 0
-	fi
+replace_with_subdir_contents() {
+  local targetdir="$1"
+  local sourcedir="$2"
+  if [ -d "$2" ]; then
+    echo "-----> Subdir buildpack in $sourcedir"
+    echo "       creating cache: $CACHE_DIR"
+    mkdir -p $CACHE_DIR
+    local TMP_DIR=`mktemp -d $CACHE_DIR/subdirXXXXX`
+    echo "       created tmp dir: $TMP_DIR"
+    echo "       moving working dir: $sourcedir to $TMP_DIR"
+    cp -R "$sourcedir/." $TMP_DIR/
+    echo "       cleaning build dir $BUILD_DIR"
+    rm -rf "$targetdir"
+    echo "       recreating $BUILD_DIR"
+    mkdir -p "$targetdir"
+    echo "       copying preserved work dir from cache $TMP_DIR to build dir $targetdir"
+    cp -R $TMP_DIR/. "$targetdir/"
+    echo "       cleaning tmp dir $TMP_DIR"
+    rm -rf $TMP_DIR
+  fi
+}
+
+# Looks for a buildpack argument with the format
+# subdir=https://github.com/my/buildpack.git
+execute_buildpack_at_subdir() {
+  local buildpack="$1"
+  dir=$(mktemp -t buildpackXXXXX)
+  rm -rf $dir
+
+  subdir=""
+  if [[ $buildpack == *'='* ]]; then
+    subdir=$(echo $buildpack | cut -d"=" -f 1)
+    BUILDPACK=$(echo $buildpack | cut -d"=" -f 2)
+  fi
+
+  url=${BUILDPACK%#*}
+  branch=${BUILDPACK#*#}
+
+  if [ "$branch" == "$url" ]; then
+    branch=""
+  fi
+
+  if [ "$url" != "" ]; then
+    echo "=====> Downloading Buildpack: $url, branch: $branch, to tmp dir $dir, against source's subdir: $subdir"
+
+    if [[ "$url" =~ \.tgz$ ]] || [[ "$url" =~ \.tgz\? ]]; then
+      mkdir -p "$dir"
+      curl -s "$url" | tar xvz -C "$dir" >/dev/null 2>&1
+    else
+      git clone $url $dir >/dev/null 2>&1
+      if [ -f "$dir/.gitmodules" ]; then
+        echo "=====> Detected git submodules. Initializing..."
+        (cd $dir && git submodule update --init --recursive)
+      fi
+    fi
+    cd $dir
+
+    if [ "$branch" != "" ]; then
+      git checkout $branch >/dev/null 2>&1
+    fi
+
+    # Ensure that these files exist.
+    chmod -f +x $dir/bin/{detect,compile,release} || true
+
+    # Buildpack is now ready to use in $dir.
+
+    # Move subdir to root
+    replace_with_subdir_contents $BUILD_DIR $BUILD_DIR/$subdir
+
+    # The rest is almost straight from buildpack-multi
+
+    framework=$($dir/bin/detect $BUILD_DIR)
+
+    if [ $? == 0 ]; then
+      echo "=====> Detected Framework: $framework"
+      $dir/bin/compile $BUILD_DIR $CACHE_DIR $ENV_DIR
+
+      if [ $? != 0 ]; then
+        exit 1
+      fi
+
+      # check if the buildpack left behind an environment for subsequent ones
+      if [ -e $dir/export ]; then
+        source $dir/export
+      fi
+
+      if [ -x $dir/bin/release ]; then
+        $dir/bin/release $BUILD_DIR > $BUILD_DIR/subdir_pack_release.out
+      fi
+    else
+      echo "Couldn't detect any framework for this buildpack. Exiting."
+      exit 1
+    fi
+  fi
+}
+
+# BUILDPACK should be set as a Heroku config var
+execute_buildpack_at_subdir "$BUILDPACK"
+
+if [[ -e $BUILD_DIR/subdir_pack_release.out ]]; then
+  echo "Using release configuration from last framework ($framework)."
 fi
-
-echo "PROJECT_PATH is undefined"
-exit 1
-
-

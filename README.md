@@ -1,13 +1,27 @@
-Add as a first buildpack in the chain. Set `PROJECT_PATH` environment variable to point to project root. It will be promoted to slug's root, everything else will be erased. Following buildpack (e.g. nodejs) will finish slug compilation.
+# Subdir buildpack
 
-**Disclaimer:** I may change the code without notice, so always pin to specific github version. Provided as is.
+This is a mashup of https://github.com/Pagedraw/heroku-buildpack-select-subdir and
+https://github.com/timanovsky/subdir-heroku-buildpack. The API is that of
+https://github.com/Pagedraw/heroku-buildpack-select-subdir but the implementation, taken
+from https://github.com/timanovsky/subdir-heroku-buildpack, actually moves all files from
+the designated subdirectory to the build root before invoking the requested buildpack.
 
-# How to use:
-1. `heroku buildpacks:clear` if necessary
-2. `heroku buildpacks:set https://github.com/timanovsky/subdir-heroku-buildpack`
-3. `heroku buildpacks:add heroku/nodejs` or whatever buildpack you need for your application
-4. `heroku config:set PROJECT_PATH=projects/nodejs/frontend` pointing to what you want to be a project root.
-5. Deploy your project to Heroku.
+Allows you to have a monolithic repo with multiple Heroku/Scalingo apps in different
+subdirectories (like Google!).
+
+## Usage
+
+* Write a bunch of Procfiles and scatter them throughout your code base.
+* Create a bunch of Heroku/Scalingo apps.
+* For each app do `heroku buildpacks:set -a <app> https://github.com/1024pix/subdir-buildpack` /
+  `scalingo env-set -a <app> BUILDPACK_URL=https://github.com/1024pix/subdir-buildpack`
+* For each app, specify a `<subdir>` and a buildpack by running
+`heroku config:add BUILDPACK='<subdir>=https://github.com/desired/heroku-buildpack' -a <app>` /
+`scalingo env-set -a <app> BUILDPACK='<subdir>=https://github.com/desired/heroku-buildpack'`
+* Deploy your app as usual (`git push`, automatic deploy…)
 
 # How it works
-The buildpack takes subdirectory you configured, erases everything else, and copies that subdirectory to project root. Then normal Heroku slug compilation proceeds.
+
+The buildpack takes subdirectory you configured, erases everything else, and
+copies that subdirectory to project root. Then it downloads the requested buildpack and
+hands the slug compilation process over to it.
