@@ -83,6 +83,7 @@ execute_buildpacks() {
         echo " !     Application is not compatible with the buildpack."
         echo "       Check buildpack documentation for more information:"
         echo "       https://doc.scalingo.com/platform/deployment/buildpacks/intro"
+        exit 1
       fi
     fi
   done
